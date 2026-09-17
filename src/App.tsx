@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import type { AppData } from "./types";
+import { supabase } from "./supabaseClient";
 import {
   loadData,
   saveData,
@@ -28,6 +29,21 @@ type Tab = "produtos" | "cadastros" | "lancamento" | "relatorios";
 type Toast = { id: number; message: string; type: "success" | "error" | "info" };
 
 export default function App() {
+    useEffect(() => {
+    async function testarSupabase() {
+      const { data, error } = await supabase
+        .from("products")
+        .select("*");
+
+      console.log("Produtos no Supabase:", data);
+
+      if (error) {
+        console.error("Erro ao acessar Supabase:", error);
+      }
+    }
+
+    testarSupabase();
+  }, []);
   const [data, setDataState] = useState<AppData>(() => loadData());
   const [tab, setTab] = useState<Tab>("produtos");
   const [month, setMonth] = useState<string>(todayISO().slice(0, 7));
