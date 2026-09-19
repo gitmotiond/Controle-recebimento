@@ -16,6 +16,9 @@ import Reports from "./components/Reports";
 import BackupManager from "./components/BackupManager";
 import PeopleManager from "./components/PeopleManager";
 
+const LOCAL_STORAGE_KEY = "controle-recebimento-data-v1";
+const PRODUCT_MIGRATION_KEY = "controle-products-migrated-to-supabase-v1";
+
 import {
   IconBox,
   IconClipboard,
@@ -55,39 +58,139 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // =========================================================
-  // CARREGAR PRODUTOS DO SUPABASE
+  // SINCRONIZAÇÃO COM SUPABASE
   // =========================================================
 
   useEffect(() => {
-    async function carregarProdutos() {
-      console.log("🔄 Carregando produtos do Supabase...");
+    let ativo = true;
 
-      const { data: produtosSupabase, error } = await supabase
-        .from("products")
-        .select("*")
-        .order("createdAt", { ascending: false });
+    async function sincronizarComSupabase() {
+      try {
+        // -----------------------------------------------------
+        // 1) MIGRA UMA VEZ OS PRODUTOS QUE JÁ ESTÃO NO
+        //    COMPUTADOR PARA O SUPABASE.
+        //    Isso evita perder os produtos da versão nova.
+        // -----------------------------------------------------
+        const migracaoFeita =
+          localStorage.getItem(PRODUCT_MIGRATION_KEY) === "1";
 
-      if (error) {
-        console.error(
-          "❌ Erro ao carregar produtos do Supabase:",
-          error
+        if (!migracaoFeita) {
+          try {
+            const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+
+            if (raw) {
+              const localData = JSON.parse(raw) as Partial<AppData>;
+              const produtosLocais = Array.isArray(localData.products)
+                ? localData.products
+                : [];
+
+              if (produtosLocais.length > 0) {
+                console.log(
+                  "🔄 Migrando produtos locais para o Supabase:",
+                  produtosLocais.length
+                );
+
+                const { error: erroMigracao } = await supabase
+                  .from("products")
+                  .upsert(produtosLocais, {
+                    onConflict: "id",
+                  });
+
+                if (erroMigracao) {
+                  console.error(
+                    "❌ Erro ao migrar produtos para o Supabase:",
+                    erroMigracao
+                  );
+                } else {
+                  localStorage.setItem(
+                    PRODUCT_MIGRATION_KEY,
+                    "1"
+                  );
+
+                  console.log(
+                    "✅ Produtos locais migrados para o Supabase."
+                  );
+                }
+              } else {
+                localStorage.setItem(
+                  PRODUCT_MIGRATION_KEY,
+                  "1"
+                );
+              }
+            }
+          } catch (erroLocal) {
+            console.error(
+              "❌ Erro ao ler dados locais para migração:",
+              erroLocal
+            );
+          }
+        }
+
+        // -----------------------------------------------------
+        // 2) BUSCA PRODUTOS E LANÇAMENTOS DO SUPABASE
+        // -----------------------------------------------------
+        const [produtosResult, recordsResult] = await Promise.all([
+          supabase
+            .from("products")
+            .select("*")
+            .order("createdAt", { ascending: false }),
+          supabase
+            .from("records")
+            .select("*")
+            .order("date", { ascending: false }),
+        ]);
+
+        if (produtosResult.error) {
+          console.error(
+            "❌ Erro ao carregar produtos do Supabase:",
+            produtosResult.error
+          );
+        }
+
+        if (recordsResult.error) {
+          console.error(
+            "❌ Erro ao carregar records do Supabase:",
+            recordsResult.error
+          );
+        }
+
+        if (!ativo) return;
+
+        setDataState((atual) => ({
+          ...atual,
+          products: produtosResult.data ?? atual.products,
+          records: recordsResult.data ?? atual.records,
+        }));
+
+        console.log(
+          "☁️ Dados sincronizados do Supabase:",
+          {
+            produtos: produtosResult.data?.length ?? 0,
+            records: recordsResult.data?.length ?? 0,
+          }
         );
-
-        return;
+      } catch (erro) {
+        console.error(
+          "❌ Erro geral na sincronização com Supabase:",
+          erro
+        );
       }
-
-      console.log(
-        "✅ Produtos carregados do Supabase:",
-        produtosSupabase
-      );
-
-      setDataState((atual) => ({
-        ...atual,
-        products: produtosSupabase ?? [],
-      }));
     }
 
-    carregarProdutos();
+    // Carrega imediatamente.
+    sincronizarComSupabase();
+
+    // Mantém computador e celular atualizados mesmo sem Realtime
+    // configurado no Supabase.
+    const intervalo = window.setInterval(
+      sincronizarComSupabase,
+      5000
+    );
+
+    return () => {
+      ativo = false;
+      window.clearInterval(intervalo);
+    };
   }, []);
 
   // =========================================================

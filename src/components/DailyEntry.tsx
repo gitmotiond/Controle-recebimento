@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import type { AppData, Product } from "../types";
+import { supabase } from "../supabaseClient";
 import {
   upsertRecord,
   todayISO,
@@ -203,38 +204,116 @@ export default function DailyEntry({ data, setData, notify }: Props) {
     notify(`Lançamento salvo: ${product.description}`, "success");
   }
 
-  function handleClear(product: Product) {
-    const r = rows[product.id];
-    if (!r) return;
-    const existing = data.records.find(
-      (rec) => rec.productId === product.id && rec.date === date
-    );
-    if (existing) {
-      if (confirm("Remover o lançamento deste produto nesta data?")) {
-        setData(deleteRecord(data, existing.id));
-        updateRow(product.id, {
-          expectedUnits: "",
-          receivedUnits: "",
-          expectedMode: "unidade",
-          receivedMode: "unidade",
-          conferenteId: "",
-          colaboradorId: "",
-          localId: "",
-          notes: "",
-          saved: false,
-        });
-        notify("Lançamento removido.", "info");
-      }
-    } else {
-      updateRow(product.id, {
-        expectedUnits: "",
-        receivedUnits: "",
-        expectedMode: "unidade",
-        receivedMode: "unidade",
-        notes: "",
-      });
-    }
+  async function handleClear(product: Product) {
+  const r = rows[product.id];
+
+  if (!r) return;
+
+  const existing = data.records.find(
+    (rec) =>
+      rec.productId === product.id &&
+      rec.date === date
+  );
+
+  // =====================================================
+  // NÃO EXISTE LANÇAMENTO SALVO
+  // =====================================================
+
+  if (!existing) {
+    updateRow(product.id, {
+      expectedUnits: "",
+      receivedUnits: "",
+      expectedMode: "unidade",
+      receivedMode: "unidade",
+      notes: "",
+      saved: false,
+    });
+
+    return;
   }
+
+  if (
+    !confirm(
+      "Remover o lançamento deste produto nesta data?"
+    )
+  ) {
+    return;
+  }
+
+  try {
+    console.log(
+      "🗑️ Excluindo lançamento do Supabase:",
+      existing.id
+    );
+
+    // =====================================================
+    // EXCLUIR DO SUPABASE
+    // =====================================================
+
+    const { error } = await supabase
+      .from("records")
+      .delete()
+      .eq("id", existing.id);
+
+    if (error) {
+      console.error(
+        "❌ Erro ao excluir lançamento:",
+        error
+      );
+
+      notify(
+        "Não foi possível excluir o lançamento do Supabase.",
+        "error"
+      );
+
+      return;
+    }
+
+    // =====================================================
+    // ATUALIZAR A TELA
+    // =====================================================
+
+    setData({
+      ...data,
+      records: data.records.filter(
+        (rec) => rec.id !== existing.id
+      ),
+    });
+
+    updateRow(product.id, {
+      expectedUnits: "",
+      receivedUnits: "",
+      expectedMode: "unidade",
+      receivedMode: "unidade",
+      conferenteId: "",
+      colaboradorId: "",
+      localId: "",
+      notes: "",
+      saved: false,
+    });
+
+    console.log(
+      "✅ Lançamento excluído do Supabase:",
+      existing.id
+    );
+
+    notify(
+      "Lançamento removido.",
+      "success"
+    );
+
+  } catch (error) {
+    console.error(
+      "❌ Erro inesperado ao excluir lançamento:",
+      error
+    );
+
+    notify(
+      "Ocorreu um erro ao excluir o lançamento.",
+      "error"
+    );
+  }
+}
 
   function fillAllExpected() {
     const updated: Record<string, RowState> = {};
